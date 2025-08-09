@@ -1,0 +1,107 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: relayforge-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
+
+  postgres:
+    image: postgres:16
+    container_name: relayforge-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ./infra/sql:/docker-entrypoint-initdb.d
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: relayforge-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ./infra/minio:/data
+
+  api-backend:
+    image: relayforge-api
+    build: ./services/api/backend
+    container_name: relayforge-api
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - rabbitmq
+      - postgres
+      - minio
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: services/frontend/dashboard/Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+    depends_on:
+      - api-backend
+
+  harvester:
+    image: relayforge-harvester
+    build: ./services/harvester
+    container_name: relayforge-harvester
+    env_file: .env
+    depends_on:
+      - rabbitmq
+      - postgres
+    command: python -m app.main
+
+  analyst:
+    image: relayforge-analyst
+    build: ./services/analyst
+    container_name: relayforge-analyst
+    env_file: .env
+    depends_on:
+      - rabbitmq
+      - postgres
+    command: python -m app.main
+
+  producer:
+    image: relayforge-producer
+    build: ./services/producer
+    container_name: relayforge-producer
+    env_file: .env
+    depends_on:
+      - rabbitmq
+      - postgres
+      - minio
+    command: python -m app.main
+
+  distributor:
+    image: relayforge-distributor
+    build: ./services/distributor
+    container_name: relayforge-distributor
+    env_file: .env
+    depends_on:
+      - rabbitmq
+      - postgres
+    command: python -m app.main
+
+volumes:
+  postgres_data:
+  minio_data:
+
