@@ -1,0 +1,41 @@
+version: "3.8"
+
+# Development overrides
+services:
+  api-backend:
+    volumes:
+      - ./services/api/backend/app:/app/app
+    environment:
+      - DEBUG=1
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  dashboard:
+    volumes:
+      - ./services/frontend/dashboard/src:/app/src
+      - ./services/frontend/dashboard/public:/app/public
+    environment:
+      - NODE_ENV=development
+
+  harvester:
+    volumes:
+      - ./services/harvester/app:/app/app
+    environment:
+      - DEBUG=1
+
+  analyst:
+    volumes:
+      - ./services/analyst/app:/app/app
+    environment:
+      - DEBUG=1
+
+  producer:
+    volumes:
+      - ./services/producer/app:/app/app
+    environment:
+      - DEBUG=1
+
+  distributor:
+    volumes:
+      - ./services/distributor/app:/app/app
+    environment:
+      - DEBUG=1

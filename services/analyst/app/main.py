@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from datetime import datetime
 
 import pika
@@ -7,6 +8,11 @@ import requests
 from bs4 import BeautifulSoup
 import trafilatura
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 USE_OPENAI = os.getenv("USE_OPENAI", "1") == "1"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -26,10 +32,21 @@ RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://%s:%s@rabbitmq:5672/" % (
     os.getenv("RABBITMQ_USER", "guest"), os.getenv("RABBITMQ_PASSWORD", "guest")
 ))
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
+
 STORY_QUEUE = os.getenv("STORY_QUEUE", "story_queue")
 MEDIA_QUEUE = os.getenv("MEDIA_QUEUE", "media_queue")
 
-engine = create_engine(DATABASE_URL)
+# Create engine with connection pooling
+engine = create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600
+)
 
 
 def fetch_article_text(url: str) -> str:
@@ -92,41 +109,54 @@ def call_llm(article_text: str, title: str) -> dict:
 
 
 def handle_message(ch, method, properties, body):
-    data = json.loads(body.decode("utf-8"))
-    url = data.get("source_url", "")
-    title = data.get("title", "")
-    article_text = fetch_article_text(url)
-    llm_output = call_llm(article_text, title)
+    try:
+        data = json.loads(body.decode("utf-8"))
+        url = data.get("source_url", "")
+        title = data.get("title", "")
+        
+        logger.info(f"Processing article: {title}")
+        
+        article_text = fetch_article_text(url)
+        llm_output = call_llm(article_text, title)
 
-    with engine.begin() as conn:
-        row = conn.execute(text(
-            """
-            INSERT INTO content_jobs (source_url, title, source_metadata, article_text, analysis_json, script_text, status)
-            VALUES (:u, :t, CAST(:m AS JSONB), :a, CAST(:j AS JSONB), :s, 'analysis_complete')
-            RETURNING id
-            """
-        ), {
-            "u": url,
-            "t": title,
-            "m": json.dumps(data.get("source_metadata", {})),
-            "a": article_text,
-            "j": json.dumps(llm_output),
-            "s": llm_output.get("script", "")
-        }).fetchone()
-        job_id = str(row[0])
+        with engine.begin() as conn:
+            row = conn.execute(text(
+                """
+                INSERT INTO content_jobs (source_url, title, source_metadata, article_text, analysis_json, script_text, status)
+                VALUES (:u, :t, CAST(:m AS JSONB), :a, CAST(:j AS JSONB), :s, 'analysis_complete')
+                RETURNING id
+                """
+            ), {
+                "u": url,
+                "t": title,
+                "m": json.dumps(data.get("source_metadata", {})),
+                "a": article_text,
+                "j": json.dumps(llm_output),
+                "s": llm_output.get("script", "")
+            }).fetchone()
+            job_id = str(row[0])
 
-    publish_media_job({"job_id": job_id})
-    ch.basic_ack(delivery_tag=method.delivery_tag)
+        publish_media_job({"job_id": job_id})
+        logger.info(f"Analysis complete for job: {job_id}")
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    except Exception as e:
+        logger.error(f"Error processing message: {str(e)}")
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
 def publish_media_job(message: dict):
-    params = pika.URLParameters(RABBITMQ_URL)
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
-    channel.queue_declare(queue=MEDIA_QUEUE, durable=True)
-    channel.basic_publish(exchange="", routing_key=MEDIA_QUEUE, body=json.dumps(message).encode("utf-8"),
-                          properties=pika.BasicProperties(delivery_mode=2))
-    connection.close()
+    try:
+        params = pika.URLParameters(RABBITMQ_URL)
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.queue_declare(queue=MEDIA_QUEUE, durable=True)
+        channel.basic_publish(exchange="", routing_key=MEDIA_QUEUE, body=json.dumps(message).encode("utf-8"),
+                              properties=pika.BasicProperties(delivery_mode=2))
+        connection.close()
+        logger.info(f"Published media job: {message.get('job_id')}")
+    except Exception as e:
+        logger.error(f"Failed to publish media job: {str(e)}")
+        raise
 
 
 def main():

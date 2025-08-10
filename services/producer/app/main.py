@@ -1,17 +1,26 @@
 import os
 import json
 import io
+import logging
 
 import pika
 import boto3
 from botocore.client import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://%s:%s@rabbitmq:5672/" % (
     os.getenv("RABBITMQ_USER", "guest"), os.getenv("RABBITMQ_PASSWORD", "guest")
 ))
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
+
 MEDIA_QUEUE = os.getenv("MEDIA_QUEUE", "media_queue")
 
 S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
@@ -20,7 +29,15 @@ S3_ACCESS_KEY = os.getenv("MINIO_ROOT_USER", "minioadmin")
 S3_SECRET_KEY = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
 PUBLIC_S3_BASE_URL = os.getenv("PUBLIC_S3_BASE_URL", "http://localhost:9000")
 
-engine = create_engine(DATABASE_URL)
+# Create engine with connection pooling
+engine = create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600
+)
 
 s3 = boto3.client(
     's3',
@@ -81,11 +98,20 @@ def update_job_media(job_id: str, media_url: str):
 
 
 def handle_message(ch, method, properties, body):
-    data = json.loads(body.decode("utf-8"))
-    job_id = data.get("job_id")
-    media_url = produce_media(job_id)
-    update_job_media(job_id, media_url)
-    ch.basic_ack(delivery_tag=method.delivery_tag)
+    try:
+        data = json.loads(body.decode("utf-8"))
+        job_id = data.get("job_id")
+        
+        logger.info(f"Processing media production for job: {job_id}")
+        
+        media_url = produce_media(job_id)
+        update_job_media(job_id, media_url)
+        
+        logger.info(f"Media production complete for job: {job_id}")
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    except Exception as e:
+        logger.error(f"Error processing media job: {str(e)}")
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
 def main():
