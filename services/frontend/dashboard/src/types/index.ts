@@ -2,6 +2,7 @@ export enum JobStatus {
   PENDING = 'pending',
   PROCESSING = 'processing',
   COMPLETED = 'completed',
+  MEDIA_COMPLETE = 'media_complete',
   FAILED = 'failed',
   PUBLISHED = 'published',
   APPROVED = 'approved',

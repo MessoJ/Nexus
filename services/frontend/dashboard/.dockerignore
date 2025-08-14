@@ -1,0 +1,28 @@
+# Exclude dependencies and build output
+node_modules
+.dist
+coverage
+build
+dist
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# System files
+.DS_Store
+Thumbs.db
+
+# VCS
+.git
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+
+# Editor
+.vscode
+.idea

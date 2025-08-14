@@ -1,10 +1,10 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { ArrowLeft, CheckCircle, Clock, XCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { Job, JobStatus } from '../types';
-import { jobsApi } from '../lib/api';
+import { getJob } from '../lib/api';
 
 // Type guard for error objects
 const isError = (error: unknown): error is Error => {
@@ -16,6 +16,7 @@ const statusIcons: Record<JobStatus, React.ReactNode> = {
   [JobStatus.PENDING]: <Clock className="h-4 w-4" />,
   [JobStatus.PROCESSING]: <Loader2 className="h-4 w-4 animate-spin" />,
   [JobStatus.COMPLETED]: <CheckCircle className="h-4 w-4" />,
+  [JobStatus.MEDIA_COMPLETE]: <CheckCircle className="h-4 w-4" />,
   [JobStatus.FAILED]: <XCircle className="h-4 w-4" />,
   [JobStatus.PUBLISHED]: <CheckCircle className="h-4 w-4" />,
   [JobStatus.APPROVED]: <CheckCircle className="h-4 w-4" />,
@@ -26,6 +27,7 @@ const statusColors: Record<JobStatus, string> = {
   [JobStatus.PENDING]: 'bg-yellow-100 text-yellow-800',
   [JobStatus.PROCESSING]: 'bg-blue-100 text-blue-800',
   [JobStatus.COMPLETED]: 'bg-green-100 text-green-800',
+  [JobStatus.MEDIA_COMPLETE]: 'bg-green-100 text-green-800',
   [JobStatus.FAILED]: 'bg-red-100 text-red-800',
   [JobStatus.PUBLISHED]: 'bg-purple-100 text-purple-800',
   [JobStatus.APPROVED]: 'bg-green-100 text-green-800',
@@ -39,8 +41,8 @@ const JobDetails: React.FC = () => {
     queryKey: ['job', jobId],
     queryFn: async () => {
       if (!jobId) throw new Error('No job ID provided');
-      const response = await jobsApi.getJob(jobId);
-      return response.data;
+      const job = await getJob(jobId!);
+      return job;
     },
     enabled: !!jobId,
   });
@@ -80,7 +82,7 @@ const JobDetails: React.FC = () => {
     <div className="space-y-6">
       <div>
         <Link
-          to="/jobs"
+          to="/"
           className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -105,7 +107,11 @@ const JobDetails: React.FC = () => {
                   <span className="ml-1">{job.status}</span>
                 </span>
                 <span className="text-sm text-gray-500">
-                  Created on {job.created_at ? format(new Date(job.created_at), 'MMM d, yyyy') : 'Unknown date'}
+                  {(() => {
+                    const d = job.created_at ? new Date(job.created_at) : null;
+                    const label = d && isValid(d) ? format(d, 'MMM d, yyyy') : 'Unknown date';
+                    return `Created on ${label}`;
+                  })()}
                 </span>
               </div>
             </div>
@@ -156,13 +162,19 @@ const JobDetails: React.FC = () => {
             <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
               <dt className="text-sm font-medium text-gray-500">Created</dt>
               <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                {job.created_at ? format(new Date(job.created_at), 'MMM d, yyyy') : 'Unknown date'}
+                {(() => {
+                  const d = job.created_at ? new Date(job.created_at) : null;
+                  return d && isValid(d) ? format(d, 'MMM d, yyyy') : 'Unknown date';
+                })()}
               </dd>
             </div>
             <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
               <dt className="text-sm font-medium text-gray-500">Last Updated</dt>
               <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                {job.updated_at ? format(new Date(job.updated_at), 'MMM d, yyyy') : 'Unknown date'}
+                {(() => {
+                  const d = job.updated_at ? new Date(job.updated_at) : null;
+                  return d && isValid(d) ? format(d, 'MMM d, yyyy') : 'Unknown date';
+                })()}
               </dd>
             </div>
             {job.media_url && (

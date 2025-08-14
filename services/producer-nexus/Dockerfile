@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:20-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -22,6 +22,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
+RUN npm install -g npm@latest
 RUN npm install --production
 
 # Copy source code

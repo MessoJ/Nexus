@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import { 
   CheckCircle2, 
   ExternalLink, 
@@ -11,12 +11,13 @@ import {
   ChevronRight,
   Loader2
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, isValid } from 'date-fns';
+import { ApiError } from '../../types';
 
 type Job = {
   id: string;
   title?: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'published';
+  status: 'pending' | 'processing' | 'completed' | 'media_complete' | 'failed' | 'published' | 'approved' | 'rejected';
   media_url?: string;
   created_at: string;
   updated_at: string;
@@ -24,8 +25,14 @@ type Job = {
 
 type StatusFilter = 'all' | Job['status'];
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 const PAGE_SIZE = 10;
+
+// Safely format relative time, falling back to 'Unknown' for invalid/missing dates
+const relativeOrUnknown = (s?: string) => {
+  const d = s ? new Date(s) : null;
+  return d && isValid(d) ? formatDistanceToNow(d, { addSuffix: true }) : 'Unknown';
+};
 
 export const Jobs: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -55,9 +62,14 @@ export const Jobs: React.FC = () => {
       setJobs(data.items);
       setTotalPages(Math.ceil(data.total / PAGE_SIZE));
     } catch (err) {
-      const error = err as AxiosError;
-      setError(error.response?.data?.detail || 'Failed to fetch jobs');
-      console.error('Error fetching jobs:', error);
+      if (axios.isAxiosError<ApiError>(err)) {
+        const msg = (err.response?.data as any)?.detail || err.response?.data?.message || err.message;
+        setError(msg || 'Failed to fetch jobs');
+        console.error('Error fetching jobs:', err);
+      } else {
+        setError('Failed to fetch jobs');
+        console.error('Error fetching jobs:', err);
+      }
     } finally {
       setLoading(false);
     }
@@ -75,8 +87,12 @@ export const Jobs: React.FC = () => {
       await axios.post(`${API_BASE}/jobs/${jobId}/approve`);
       await fetchJobs();
     } catch (err) {
-      const error = err as AxiosError;
-      setError(error.response?.data?.detail || 'Failed to approve job');
+      if (axios.isAxiosError<ApiError>(err)) {
+        const msg = (err.response?.data as any)?.detail || err.response?.data?.message || err.message;
+        setError(msg || 'Failed to approve job');
+      } else {
+        setError('Failed to approve job');
+      }
     } finally {
       setApprovingId(null);
     }
@@ -93,8 +109,11 @@ export const Jobs: React.FC = () => {
       pending: { color: 'bg-yellow-100 text-yellow-800', label: 'Pending' },
       processing: { color: 'bg-blue-100 text-blue-800', label: 'Processing' },
       completed: { color: 'bg-green-100 text-green-800', label: 'Completed' },
+      media_complete: { color: 'bg-green-100 text-green-800', label: 'Media Complete' },
       failed: { color: 'bg-red-100 text-red-800', label: 'Failed' },
       published: { color: 'bg-purple-100 text-purple-800', label: 'Published' },
+      approved: { color: 'bg-indigo-100 text-indigo-800', label: 'Approved' },
+      rejected: { color: 'bg-gray-100 text-gray-800', label: 'Rejected' },
     };
     
     const { color, label } = statusMap[status] || { color: 'bg-gray-100 text-gray-800', label: status };
@@ -163,8 +182,11 @@ export const Jobs: React.FC = () => {
                     <option value="pending">Pending</option>
                     <option value="processing">Processing</option>
                     <option value="completed">Completed</option>
+                    <option value="media_complete">Media Complete</option>
                     <option value="failed">Failed</option>
                     <option value="published">Published</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
                   </select>
                 </div>
               </div>
@@ -216,11 +238,11 @@ export const Jobs: React.FC = () => {
                     </div>
                     <div className="mt-1 flex flex-col sm:flex-row sm:flex-wrap sm:space-x-6">
                       <div className="mt-1 flex items-center text-sm text-gray-500">
-                        <span>Created {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}</span>
+                        <span>Created {relativeOrUnknown(job.created_at)}</span>
                       </div>
                       {job.updated_at !== job.created_at && (
                         <div className="mt-1 flex items-center text-sm text-gray-500">
-                          <span>Updated {formatDistanceToNow(new Date(job.updated_at), { addSuffix: true })}</span>
+                          <span>Updated {relativeOrUnknown(job.updated_at)}</span>
                         </div>
                       )}
                     </div>

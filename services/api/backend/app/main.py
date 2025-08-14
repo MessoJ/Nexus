@@ -51,6 +51,7 @@ class JobStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    MEDIA_COMPLETE = "media_complete"
     PUBLISHED = "published"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -154,19 +155,26 @@ async def list_jobs(
             total_count = rows[0].total_count if rows else 0
             pages = (total_count + limit - 1) // limit if limit > 0 else 0
             
-            # Convert rows to JobOut objects
-            jobs = [
-                JobOut(
-                    id=str(row[0]),
-                    title=row[1],
-                    status=row[2],
-                    media_url=row[3],
-                    created_at=row[4],
-                    updated_at=row[5]
-                )
-                for row in rows
-            ]
-            
+            # Convert rows to JobOut objects with robust validation
+            jobs = []
+            for row in rows:
+                try:
+                    job_data = {
+                        "id": str(row.id),
+                        "title": row.title,
+                        "status": row.status,
+                        "media_url": row.media_url,
+                        "created_at": row.created_at,
+                        "updated_at": row.updated_at
+                    }
+                    jobs.append(JobOut(**job_data))
+                except Exception as e:
+                    logger.error(f"Pydantic validation failed for database row: {row}")
+                    logger.error(f"Error: {e}")
+                    # We can choose to skip the problematic job or re-raise
+                    # For now, let's re-raise to ensure the error is visible
+                    raise e
+
             return PaginatedJobs(
                 items=jobs,
                 total=total_count,
@@ -491,7 +499,8 @@ def dashboard():
             
             try {
                 const response = await fetch('/jobs');
-                allJobs = await response.json();
+                const data = await response.json();
+            allJobs = data.items || [];
                 
                 if (allJobs.length === 0) {
                     container.innerHTML = `

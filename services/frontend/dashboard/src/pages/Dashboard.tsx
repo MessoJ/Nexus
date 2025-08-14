@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { Search, RefreshCw, Filter, CheckCircle, Clock, XCircle, AlertCircle } from 'lucide-react';
-import { JobStatus, Job } from '../types';
-import { jobsApi } from '../lib/api';
+import { JobStatus, Job, PaginatedJobs } from '../types';
+import { getJobs } from '../lib/api';
 
 const statusColors = {
   [JobStatus.PENDING]: 'bg-yellow-100 text-yellow-800',
   [JobStatus.PROCESSING]: 'bg-blue-100 text-blue-800',
   [JobStatus.COMPLETED]: 'bg-green-100 text-green-800',
+  [JobStatus.MEDIA_COMPLETE]: 'bg-green-100 text-green-800',
   [JobStatus.FAILED]: 'bg-red-100 text-red-800',
   [JobStatus.PUBLISHED]: 'bg-purple-100 text-purple-800',
   [JobStatus.APPROVED]: 'bg-indigo-100 text-indigo-800',
@@ -20,43 +21,33 @@ const statusIcons = {
   [JobStatus.PENDING]: <Clock className="h-4 w-4" />,
   [JobStatus.PROCESSING]: <RefreshCw className="h-4 w-4 animate-spin" />,
   [JobStatus.COMPLETED]: <CheckCircle className="h-4 w-4" />,
+  [JobStatus.MEDIA_COMPLETE]: <CheckCircle className="h-4 w-4" />,
   [JobStatus.FAILED]: <XCircle className="h-4 w-4" />,
   [JobStatus.PUBLISHED]: <CheckCircle className="h-4 w-4" />,
   [JobStatus.APPROVED]: <CheckCircle className="h-4 w-4" />,
   [JobStatus.REJECTED]: <AlertCircle className="h-4 w-4" />,
 };
 
-const fetchJobs = async ({ queryKey }: { queryKey: any[] }) => {
-  const [_, page, limit, status, search] = queryKey;
-  return jobsApi.getJobs({
-    page,
-    limit,
-    status,
-    search,
-  });
-};
-
 const Dashboard: React.FC = () => {
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
-  const [statusFilter, setStatusFilter] = useState<JobStatus | ''>('');
+  const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  const { data, isLoading, isError, refetch } = useQuery(
-    ['jobs', page, limit, statusFilter, searchQuery],
-    fetchJobs,
-    {
-      keepPreviousData: true,
-    }
-  );
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['jobs', page, limit, statusFilter, searchQuery],
+    queryFn: () => getJobs(page, 10, statusFilter === 'all' ? undefined : statusFilter, searchQuery || undefined),
+    retry: 1,
+    retryDelay: 1000,
+  });
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     refetch();
   };
 
-  const handleStatusFilter = (status: JobStatus | '') => {
+  const handleStatusFilter = (status: JobStatus | 'all') => {
     setStatusFilter(status);
     setPage(1);
   };
@@ -82,6 +73,11 @@ const Dashboard: React.FC = () => {
             </h3>
             <div className="mt-2 text-sm text-red-700">
               <p>There was an error loading the jobs. Please try again.</p>
+              {error && (
+                <p className="mt-1 text-xs">
+                  Error: {error instanceof Error ? error.message : 'Unknown error'}
+                </p>
+              )}
             </div>
             <div className="mt-4">
               <button
@@ -98,11 +94,16 @@ const Dashboard: React.FC = () => {
     );
   }
 
+  // Safe data extraction with defaults
+  const jobs = data?.items || [];
+  const total = data?.total || 0;
+  const hasNextPage = data?.hasNextPage || false;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Content Jobs</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Content Jobs Dashboard</h1>
           <p className="mt-1 text-sm text-gray-500">
             Manage and monitor your content generation jobs
           </p>
@@ -148,9 +149,9 @@ const Dashboard: React.FC = () => {
                 <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
                   <div className="py-1" role="menu" aria-orientation="vertical">
                     <button
-                      onClick={() => handleStatusFilter('')}
+                      onClick={() => handleStatusFilter('all')}
                       className={`w-full text-left px-4 py-2 text-sm ${
-                        statusFilter === '' ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
+                        statusFilter === 'all' ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
                       }`}
                       role="menuitem"
                     >
@@ -203,8 +204,8 @@ const Dashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {data?.items?.length > 0 ? (
-                data.items.map((job: any) => (
+              {jobs.length > 0 ? (
+                jobs.map((job) => (
                   <tr key={job.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
@@ -221,11 +222,11 @@ const Dashboard: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
                         className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          statusColors[job.status as JobStatus] || 'bg-gray-100 text-gray-800'
+                          statusColors[job.status] || 'bg-gray-100 text-gray-800'
                         }`}
                       >
                         <span className="flex items-center">
-                          {statusIcons[job.status as JobStatus] || null}
+                          {statusIcons[job.status] || null}
                           <span className="ml-1">
                             {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
                           </span>
@@ -233,7 +234,10 @@ const Dashboard: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {format(new Date(job.created_at), 'MMM d, yyyy HH:mm')}
+                      {(() => {
+                        const date = new Date(job.created_at);
+                        return isValid(date) ? format(date, 'MMM d, yyyy HH:mm') : 'Unknown';
+                      })()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <Link
@@ -256,7 +260,7 @@ const Dashboard: React.FC = () => {
           </table>
         </div>
 
-        {data?.total > 0 && (
+        {total > 0 && (
           <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
             <div className="flex-1 flex justify-between sm:hidden">
               <button
@@ -270,9 +274,9 @@ const Dashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => setPage((p) => p + 1)}
-                disabled={!data?.hasNextPage}
+                disabled={!hasNextPage}
                 className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${
-                  !data?.hasNextPage ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'
+                  !hasNextPage ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'
                 }`}
               >
                 Next
@@ -283,9 +287,9 @@ const Dashboard: React.FC = () => {
                 <p className="text-sm text-gray-700">
                   Showing <span className="font-medium">{(page - 1) * limit + 1}</span> to{' '}
                   <span className="font-medium">
-                    {Math.min(page * limit, data?.total || 0)}
+                    {Math.min(page * limit, total)}
                   </span>{' '}
-                  of <span className="font-medium">{data?.total || 0}</span> results
+                  of <span className="font-medium">{total}</span> results
                 </p>
               </div>
               <div>
@@ -317,9 +321,9 @@ const Dashboard: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setPage((p) => p + 1)}
-                    disabled={!data?.hasNextPage}
+                    disabled={!hasNextPage}
                     className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium ${
-                      !data?.hasNextPage ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-50'
+                      !hasNextPage ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-50'
                     }`}
                   >
                     <span className="sr-only">Next</span>

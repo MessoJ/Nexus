@@ -1,29 +1,42 @@
-FROM node:20-alpine
-
+FROM node:20-alpine AS dev
 WORKDIR /app
 
-# Copy package files and install dependencies
-COPY services/frontend/dashboard/package*.json ./
-RUN npm install --no-audit --no-fund
+# Install deps for dev
+COPY package*.json ./
+RUN npm ci || npm install
+# Copy app for dev
+COPY . .
+EXPOSE 5173
+# Dev server
+CMD ["npm", "run", "dev", "--", "--host"]
 
-# Copy source files
-COPY services/frontend/dashboard/public ./public
-COPY services/frontend/dashboard/src ./src
-COPY services/frontend/dashboard/tsconfig.json ./tsconfig.json
-COPY services/frontend/dashboard/vite.config.ts ./vite.config.ts
+FROM node:20-alpine AS builder
+WORKDIR /app
 
-# Bring logo from repository root into public assets
-COPY churnlogo.png ./public/logo.png
+# Install dependencies first for caching
+COPY package*.json ./
+RUN npm install
 
-# Build the application
+# Copy source code
+COPY . .
+
+# Build the app
 RUN npm run build
 
-# Install only production dependencies for the server
-RUN npm install --only=production --no-audit --no-fund
+# Production stage
+FROM node:20-alpine
+WORKDIR /app
 
-# Copy the server file after building
-COPY services/frontend/dashboard/server.js ./server.js
+# Copy built files from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
 
+# For development, we'll override with docker-compose volumes
 EXPOSE 5173
+
+# Default to production server
 CMD ["npm", "run", "serve"]
 
+# For development (override in compose):
+# CMD ["npm", "run", "dev", "--", "--host"]

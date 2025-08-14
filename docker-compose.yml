@@ -72,12 +72,21 @@ services:
 
   dashboard:
     build:
-      context: .
-      dockerfile: services/frontend/dashboard/Dockerfile
+      context: ./services/frontend/dashboard
+      dockerfile: Dockerfile
+      target: dev
+    container_name: nexus-dashboard
     ports:
       - "5173:5173"
+    volumes:
+      - ./services/frontend/dashboard:/app
+      - /app/node_modules
+    working_dir: /app
     environment:
-      - VITE_API_BASE=http://localhost:8000
+      - NODE_ENV=development
+      - VITE_API_BASE=/api
+      - VITE_PROXY_TARGET=http://api-backend:8000
+    command: npm run dev -- --host
     depends_on:
       - api-backend
 
@@ -152,4 +161,3 @@ services:
 volumes:
   postgres_data:
   minio_data:
-
